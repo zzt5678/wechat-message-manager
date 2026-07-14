@@ -9,6 +9,12 @@ ROOT = Path(__file__).resolve().parent
 
 
 def main() -> int:
+    # Keep help, chat names, and JSON stable on English Windows consoles whose
+    # legacy code page cannot encode Chinese or emoji.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}:
         print("""Local WeChat message manager (read-only)
 

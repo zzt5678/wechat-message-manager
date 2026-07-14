@@ -126,7 +126,12 @@ class SecurityBoundaryTests(unittest.TestCase):
             runner = destination / "scripts/run_manager.py"
             completed = subprocess.run(
                 [sys.executable, str(runner), "--help"],
-                cwd=directory, capture_output=True, text=True, check=True,
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+                env={**os.environ, "PYTHONIOENCODING": "ascii"},
             )
             self.assertIn("Local WeChat message manager", completed.stdout)
             self.assertNotIn(str(Path.home()), completed.stdout)
