@@ -114,7 +114,7 @@ macOS 把 `.\manage.cmd` 换成 `./manage.sh`。
 python scripts/install_skill.py
 ```
 
-之后可说：
+安装后开启一个新的 Codex 会话，让 Codex 重新发现 Skill。之后可说：
 
 > 使用 `$manage-wechat-messages` 刷新今天的微信消息，按重要事项、待办、截止时间、风险和有价值链接汇总。
 

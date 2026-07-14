@@ -69,6 +69,7 @@ def main() -> int:
             "destination": "$CODEX_HOME/skills/manage-wechat-messages",
             "repository_linked": True,
             "private_path_output": False,
+            "next_step": "Start a new Codex session so the installed skill is discovered",
         }, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
