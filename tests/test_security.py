@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import base64
 import json
 import os
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -13,10 +16,11 @@ from Crypto.Cipher import AES
 
 from capture_keys_macos import HOOK, match_candidate, plan as macos_plan
 from capture_keys_windows import derive_enc_key, plan as windows_plan, recover
-from dpapi_store import load_secret_json, save_secret_json
+from dpapi_store import _crypt, _LEGACY_ENTROPY, load_secret_json, save_secret_json
 from import_keys import verify_key
 from manager_config import CORE_DATABASES
 from refresh_vault import decrypt_to_temp, hmac_key
+from scripts.install_skill import install as install_skill
 
 
 def authenticated_page(key: bytes, salt: bytes) -> bytes:
@@ -40,6 +44,15 @@ class SecurityBoundaryTests(unittest.TestCase):
             save_secret_json(secret, path)
             self.assertEqual(load_secret_json(path), secret)
             self.assertNotIn(("ab" * 32).encode("ascii"), path.read_bytes())
+
+    @unittest.skipUnless(os.name == "nt", "DPAPI is Windows-only")
+    def test_legacy_dpapi_store_remains_readable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.dpapi"
+            plaintext = json.dumps({"keys": {"legacy": "value"}}, separators=(",", ":")).encode()
+            protected = _crypt(plaintext, True, _LEGACY_ENTROPY)
+            path.write_bytes(b"CWV1\n" + base64.b64encode(protected) + b"\n")
+            self.assertEqual(load_secret_json(path)["keys"], {"legacy": "value"})
 
     def test_windows_capture_plan_is_non_executing_and_redacted(self) -> None:
         value = windows_plan({"wechat_version": "test"})
@@ -106,6 +119,27 @@ class SecurityBoundaryTests(unittest.TestCase):
             output = temporary.read_bytes()
         self.assertEqual(output[:16], b"SQLite format 3\x00")
         self.assertEqual(output[18:4016], plaintext[18:4016])
+
+    def test_bundled_skill_installs_and_finds_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = install_skill(Path(directory))
+            runner = destination / "scripts/run_manager.py"
+            completed = subprocess.run(
+                [sys.executable, str(runner), "--help"],
+                cwd=directory, capture_output=True, text=True, check=True,
+            )
+            self.assertIn("Local WeChat message manager", completed.stdout)
+            self.assertNotIn(str(Path.home()), completed.stdout)
+
+    def test_repository_has_no_nested_runtime_project(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        self.assertFalse((root / ".gitmodules").exists())
+        for path in root.rglob("*.py"):
+            if path.resolve() == Path(__file__).resolve() or any(
+                part in {".venv", "05_tmp", "__pycache__"} for part in path.parts
+            ):
+                continue
+            self.assertNotIn("git clone", path.read_text(encoding="utf-8", errors="replace").casefold())
 
 
 if __name__ == "__main__":

@@ -15,16 +15,25 @@ PROJECT_DIR = Path(__file__).resolve().parent
 def default_private_root() -> Path:
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+        preferred = base / "WechatMessageManager"
+        legacy = base / "CodexWechatVault"
+        # Existing installations keep their original private vault. Fresh
+        # installations use the neutral public project name.
+        if legacy.exists() and not preferred.exists():
+            return legacy
+        return preferred
     elif sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-    return base / ("CodexWechatVault" if os.name == "nt" else "WechatMessageManager")
+    return base / "WechatMessageManager"
 
 
 PRIVATE_ROOT = Path(os.environ.get("WECHAT_MANAGER_VAULT", default_private_root())).resolve()
 CONFIG_FILE = PRIVATE_ROOT / "config.json"
-KEYS_FILE = PRIVATE_ROOT / "secrets" / "database-keys.dpapi"
+KEYS_FILE = PRIVATE_ROOT / "secrets" / (
+    "database-keys.dpapi" if os.name == "nt" else "database-keys.keychain"
+)
 DECRYPTED_DIR = PRIVATE_ROOT / "decrypted" / "current"
 STATE_FILE = PRIVATE_ROOT / "state" / "decrypt-state.json"
 MANIFEST_DIR = PRIVATE_ROOT / "manifests"

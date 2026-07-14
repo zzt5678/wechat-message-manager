@@ -186,7 +186,7 @@ def main() -> int:
     history_parser.add_argument("--since")
     history_parser.add_argument("--until")
     digest_parser = sub.add_parser("digest-source")
-    digest_parser.add_argument("--date", required=True)
+    digest_parser.add_argument("--date", required=True, help="YYYY-MM-DD or today")
     digest_parser.add_argument("--max-messages", type=int, default=3000)
     for item in (status_parser, sessions_parser, history_parser, digest_parser):
         item.add_argument("--format", choices=("json", "text"), default="json")
@@ -209,7 +209,11 @@ def main() -> int:
             end = parse_time(args.until, now)
             emit(history(session["_username"], start, end, max(1, min(args.limit, 2000))), args.format)
         else:
-            day = datetime.fromisoformat(args.date).replace(tzinfo=now.tzinfo)
+            day = (
+                now.replace(hour=0, minute=0, second=0, microsecond=0)
+                if args.date.casefold() == "today"
+                else datetime.fromisoformat(args.date).replace(tzinfo=now.tzinfo)
+            )
             start, end = int(day.timestamp()), int((day + timedelta(days=1)).timestamp()) - 1
             remaining = max(1, min(args.max_messages, 10_000))
             chats = []
@@ -222,7 +226,7 @@ def main() -> int:
                 if messages:
                     chats.append({"chat": session["name"], "messages": messages})
                     remaining -= len(messages)
-            emit({"date": args.date, "message_count": sum(len(c["messages"]) for c in chats), "chats": chats}, args.format)
+            emit({"date": day.date().isoformat(), "message_count": sum(len(c["messages"]) for c in chats), "chats": chats}, args.format)
         return 0
     except Exception as exc:
         print(json.dumps({"status": "FAILED", "error": str(exc)[:500]}, ensure_ascii=False), file=sys.stderr)

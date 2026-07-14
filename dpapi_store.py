@@ -16,7 +16,8 @@ class DATA_BLOB(ctypes.Structure):
 
 
 CRYPTPROTECT_UI_FORBIDDEN = 0x1
-_ENTROPY = b"codex-wechat-vault-v1"
+_ENTROPY = b"wechat-message-manager-v1"
+_LEGACY_ENTROPY = b"codex-wechat-vault-v1"
 
 
 def _blob(data: bytes) -> tuple[DATA_BLOB, ctypes.Array]:
@@ -24,7 +25,7 @@ def _blob(data: bytes) -> tuple[DATA_BLOB, ctypes.Array]:
     return DATA_BLOB(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte))), buffer
 
 
-def _crypt(data: bytes, protect: bool) -> bytes:
+def _crypt(data: bytes, protect: bool, entropy_value: bytes = _ENTROPY) -> bytes:
     if os.name != "nt":
         raise RuntimeError("DPAPI storage is only available on Windows")
     crypt32 = ctypes.windll.crypt32
@@ -42,7 +43,7 @@ def _crypt(data: bytes, protect: bool) -> bytes:
     kernel32.LocalFree.argtypes = [ctypes.c_void_p]
     kernel32.LocalFree.restype = ctypes.c_void_p
     source, source_buffer = _blob(data)
-    entropy, entropy_buffer = _blob(_ENTROPY)
+    entropy, entropy_buffer = _blob(entropy_value)
     destination = DATA_BLOB()
     if protect:
         ok = crypt32.CryptProtectData(
@@ -77,7 +78,20 @@ def load_secret_json(path: Path = KEYS_FILE) -> dict[str, Any]:
     envelope = path.read_bytes().splitlines()
     if len(envelope) != 2 or envelope[0] != b"CWV1":
         raise RuntimeError("Unknown encrypted key-file format")
-    value = json.loads(_crypt(base64.b64decode(envelope[1]), False).decode("utf-8"))
+    protected = base64.b64decode(envelope[1])
+    last_error: OSError | None = None
+    plaintext: bytes | None = None
+    for entropy in (_ENTROPY, _LEGACY_ENTROPY):
+        try:
+            plaintext = _crypt(protected, False, entropy)
+            break
+        except OSError as exc:
+            last_error = exc
+    if plaintext is None:
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Unable to decrypt the protected key store")
+    value = json.loads(plaintext.decode("utf-8"))
     if not isinstance(value, dict):
         raise RuntimeError("Encrypted key file does not contain an object")
     return value

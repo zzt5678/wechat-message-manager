@@ -30,3 +30,5 @@
 - `mcncarl/yichen-skills`：原 macOS 工作流教程；因许可证限制，本项目的查询与管理代码为独立实现。
 
 请分别查看这些项目的当前许可证和安全边界，不要把它们的二进制或源码直接打包进本仓库。
+
+这些项目不是运行时依赖。本仓库没有 Git submodule、vendor checkout 或调用另一个仓库的包装器；macOS 捕获、密钥验证、解密、Keychain 存储和查询均由本仓库文件完成。详细归属见根目录 `THIRD_PARTY_NOTICES.md`。

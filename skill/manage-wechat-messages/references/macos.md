@@ -5,7 +5,7 @@ Use `scripts/run_manager.py` followed by the arguments below.
 ```text
 preflight
 refresh --mode incremental
-query digest-source --date YYYY-MM-DD --format json
+query digest-source --date today --format json
 ```
 
 If keys are absent, prefer verified manual import:

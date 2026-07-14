@@ -6,7 +6,7 @@ Use `scripts/run_manager.py` followed by the arguments below.
 preflight
 capture-plan
 refresh --mode incremental
-query digest-source --date YYYY-MM-DD --format json
+query digest-source --date today --format json
 ```
 
 If preflight shows no protected keys, show the non-executing `capture-plan` and request explicit consent. Only after consent:

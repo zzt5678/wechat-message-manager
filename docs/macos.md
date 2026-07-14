@@ -2,6 +2,8 @@
 
 macOS 的数据库、解密、freshness 和查询流程与 Windows 共用；不同点只有 key 的来源和落盘方式。key 最终存入当前用户的 macOS Keychain。
 
+本教程是单仓库流程：不需要克隆最初参考的教程项目，也不需要外部 key DLL。`capture_keys_macos.py`、`import_keys.py`、`refresh_vault.py`、`secret_store.py` 和 `vault_query.py` 已包含所需实现。setup 只安装 `requirements.txt` 中的 PyPI 包。
+
 ## 推荐：导入本人已有 key
 
 如果原教程或本人已有工具产生了数据库相对路径到 64 位十六进制 key 的 JSON：

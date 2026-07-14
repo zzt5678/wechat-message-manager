@@ -28,3 +28,4 @@ audit/
 exports/
 .coverage
 htmlcov/
+.manager-home

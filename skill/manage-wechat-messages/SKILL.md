@@ -17,7 +17,7 @@ Manage the user's local WeChat data through the repository CLI. Treat the origin
    - Windows capture requires explicit approval for a one-time `ReadProcessMemory` scan in the current conversation.
    - macOS Frida capture requires separate explicit approval for Hooking a user-prepared signed copy. Manual verified key import is preferred.
 6. Before every query session run `refresh --mode incremental`. Continue only after `VERIFIED_REFRESH`.
-7. Query only the decrypted vault. Use `digest-source --date YYYY-MM-DD --format json` for a daily summary and keep the time window bounded.
+7. Query only the decrypted vault. Use `digest-source --date today --format json` for today's summary, or pass `YYYY-MM-DD` for another day. Keep the time window bounded.
 
 ## Summarize
 

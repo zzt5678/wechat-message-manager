@@ -11,12 +11,20 @@ def find_root() -> Path:
     configured = os.environ.get("WECHAT_MANAGER_HOME")
     if configured:
         candidates.append(Path(configured).expanduser())
+    marker = Path(__file__).resolve().parents[1] / ".manager-home"
+    if marker.is_file():
+        try:
+            candidates.append(Path(marker.read_text(encoding="utf-8").strip()))
+        except OSError:
+            pass
     candidates.extend([Path.cwd(), Path(__file__).resolve().parents[3]])
     for candidate in candidates:
         resolved = candidate.resolve()
         if (resolved / "wechat_manager.py").is_file():
             return resolved
-    raise SystemExit("Set WECHAT_MANAGER_HOME to the cloned wechat-message-manager repository")
+    raise SystemExit(
+        "Repository not found. Run scripts/install_skill.py from the cloned wechat-message-manager repository."
+    )
 
 
 def main() -> int:
