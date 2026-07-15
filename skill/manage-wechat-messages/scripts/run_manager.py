@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from __future__ import annotations
 
 import os
@@ -27,9 +28,21 @@ def find_root() -> Path:
     )
 
 
+def manager_python(root: Path) -> Path:
+    python = (
+        root / ".venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else root / ".venv" / "bin" / "python"
+    )
+    if not python.is_file() or (os.name != "nt" and not os.access(python, os.X_OK)):
+        setup = ".\\setup.ps1" if os.name == "nt" else "./setup.sh"
+        raise SystemExit(f"Repository environment not found. Run {setup} in the repository first.")
+    return python
+
+
 def main() -> int:
     root = find_root()
-    return subprocess.run([sys.executable, str(root / "wechat_manager.py"), *sys.argv[1:]], cwd=root).returncode
+    return subprocess.run([str(manager_python(root)), str(root / "wechat_manager.py"), *sys.argv[1:]], cwd=root).returncode
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ from pathlib import Path
 import shutil
 import sys
 
+from manager_config import redact_private_text
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "skill" / "manage-wechat-messages"
@@ -73,7 +75,7 @@ def main() -> int:
         }, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
-        print(json.dumps({"status": "FAILED", "error": str(exc)[:500]}, ensure_ascii=False), file=sys.stderr)
+        print(json.dumps({"status": "FAILED", "error": redact_private_text(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2
 
 

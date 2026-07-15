@@ -75,10 +75,15 @@ def save_secret_json(value: dict[str, Any], path: Path = KEYS_FILE) -> None:
 def load_secret_json(path: Path = KEYS_FILE) -> dict[str, Any]:
     if not path.exists():
         return {}
+    if path.stat().st_size > 1024 * 1024:
+        raise RuntimeError("Encrypted key file exceeds the 1 MiB safety limit")
     envelope = path.read_bytes().splitlines()
     if len(envelope) != 2 or envelope[0] != b"CWV1":
         raise RuntimeError("Unknown encrypted key-file format")
-    protected = base64.b64decode(envelope[1])
+    try:
+        protected = base64.b64decode(envelope[1], validate=True)
+    except ValueError as exc:
+        raise RuntimeError("Encrypted key file has invalid base64 content") from exc
     last_error: OSError | None = None
     plaintext: bytes | None = None
     for entropy in (_ENTROPY, _LEGACY_ENTROPY):

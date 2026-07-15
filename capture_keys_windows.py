@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import re
 import struct
@@ -15,8 +16,11 @@ import sys
 import time
 from typing import Iterable
 
-from manager_config import CONFIG_FILE, CORE_DATABASES, load_config, public_path_label, KEYS_FILE
-from secret_store import save_secret_json
+from manager_config import (
+    CONFIG_FILE, CORE_DATABASES, KEYS_FILE, TOOL_VERSION, configured_core_databases,
+    load_config, public_path_label, redact_private_text, require_supported_platform,
+)
+from secret_store import load_secret_json, save_secret_json
 
 
 PAGE_SIZE = 4096
@@ -30,6 +34,7 @@ PAGE_GUARD = 0x100
 PAGE_NOACCESS = 0x01
 MAX_ADDRESS = 0x7FFFFFFFFFFF
 READ_CHUNK_SIZE = 16 * 1024 * 1024
+ERROR_ACCESS_DENIED = 5
 
 # WeChat 4.x keeps a masked account passphrase behind a small private-memory
 # descriptor. A candidate is never trusted until keys derived from it validate
@@ -40,6 +45,10 @@ DLL_MASK_PATTERN = re.compile(
     br"\x48\xBA(.{8}).{3,8}?\x48\xBA(.{8}).{3,8}?\x48\x85\xC0",
     re.DOTALL,
 )
+
+
+class ProcessInspectionAccessDenied(RuntimeError):
+    pass
 
 
 class MEMORY_BASIC_INFORMATION(ctypes.Structure):
@@ -59,9 +68,11 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def process_info() -> dict[str, object]:
+def process_info(pid: int) -> dict[str, object]:
     script = r'''
-$p = Get-Process Weixin -ErrorAction Stop | Select-Object -First 1
+$ErrorActionPreference = 'Stop'
+try {
+$p = Get-Process -Id $env:WECHAT_MANAGER_PID -ErrorAction Stop
 $m = $p.Modules | Where-Object ModuleName -eq 'Weixin.dll' | Select-Object -First 1
 if (-not $m) { throw 'Weixin.dll is not loaded' }
 $s = Get-AuthenticodeSignature -LiteralPath $m.FileName
@@ -71,11 +82,23 @@ $s = Get-AuthenticodeSignature -LiteralPath $m.FileName
   signature = $s.Status.ToString()
   signer = $s.SignerCertificate.Subject
 } | ConvertTo-Json -Compress
+} catch {
+  $e = $_.Exception
+  while ($e) {
+    $native = if ($e.PSObject.Properties.Name -contains 'NativeErrorCode') { $e.NativeErrorCode } else { 0 }
+    if ($native -eq 5 -or $e.HResult -eq -2147024891) { exit 5 }
+    $e = $e.InnerException
+  }
+  exit 3
+}
 '''
     completed = subprocess.run(
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True, text=True, timeout=20, check=False,
+        env={**os.environ, "WECHAT_MANAGER_PID": str(int(pid))},
     )
+    if completed.returncode == ERROR_ACCESS_DENIED:
+        raise ProcessInspectionAccessDenied("PROCESS_MEMORY_ACCESS_DENIED")
     if completed.returncode != 0:
         raise RuntimeError("Unable to inspect the running Weixin process")
     value = json.loads(completed.stdout)
@@ -98,10 +121,12 @@ def get_pids() -> list[int]:
     return pids
 
 
-def collect_pages(db_base: Path) -> dict[str, bytes]:
+def collect_pages(db_base: Path, required_databases: Iterable[str] = CORE_DATABASES) -> dict[str, bytes]:
+    required = tuple(required_databases)
     pages: dict[str, bytes] = {}
-    for path in db_base.rglob("*.db"):
-        if not path.is_file() or path.name.endswith(("-wal", "-shm")):
+    for rel in required:
+        path = db_base / rel
+        if not path.is_file():
             continue
         try:
             with path.open("rb") as handle:
@@ -110,9 +135,8 @@ def collect_pages(db_base: Path) -> dict[str, bytes]:
             continue
         if len(page) != PAGE_SIZE:
             continue
-        rel = path.relative_to(db_base).as_posix()
         pages[rel] = page
-    missing = [rel for rel in CORE_DATABASES if rel not in pages]
+    missing = [rel for rel in required if rel not in pages]
     if missing:
         raise RuntimeError("One or more core databases are missing or unreadable")
     return pages
@@ -148,12 +172,32 @@ def read_exact(kernel32, handle, address: int, size: int) -> bytes:
     return buffer.raw[:read.value] if read.value == size else b""
 
 
+def open_process_for_scan(kernel32, pid: int):
+    """Open one process and capture the Win32 error before another API call."""
+    kernel32.SetLastError(0)
+    handle = kernel32.OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, pid)
+    return handle, 0 if handle else int(kernel32.GetLastError())
+
+
+def process_memory_access_stop_reason(scan_stats: Iterable[dict[str, int]]) -> str | None:
+    """Return a stable stop code only when every validated target denied access."""
+    stats = tuple(scan_stats)
+    if stats and all(
+        item.get("opened") == 0 and item.get("open_error") == ERROR_ACCESS_DENIED
+        for item in stats
+    ):
+        return "PROCESS_MEMORY_ACCESS_DENIED"
+    return None
+
+
 def scan_process(pid: int) -> tuple[set[bytes], dict[str, int]]:
     kernel32 = ctypes.windll.kernel32
     kernel32.OpenProcess.restype = wintypes.HANDLE
-    handle = kernel32.OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, pid)
+    handle, open_error = open_process_for_scan(kernel32, pid)
     if not handle:
-        return set(), {"opened": 0, "bytes_read": 0, "markers": 0}
+        return set(), {
+            "opened": 0, "bytes_read": 0, "markers": 0, "open_error": open_error,
+        }
     candidates: set[bytes] = set()
     bytes_read = 0
     markers = 0
@@ -198,32 +242,40 @@ def scan_process(pid: int) -> tuple[set[bytes], dict[str, int]]:
             address = next_address
     finally:
         kernel32.CloseHandle(handle)
-    return candidates, {"opened": 1, "bytes_read": bytes_read, "markers": markers}
+    return candidates, {
+        "opened": 1, "bytes_read": bytes_read, "markers": markers, "open_error": 0,
+    }
 
 
 def xor_bytes(left: bytes, right: bytes) -> bytes:
     return bytes(a ^ b for a, b in zip(left, right))
 
 
-def recover(raw_candidates: Iterable[bytes], masks: Iterable[bytes], pages: dict[str, bytes]) -> tuple[bytes, dict[str, str]] | None:
-    probe = pages[CORE_DATABASES[0]]
+def recover(
+    raw_candidates: Iterable[bytes], masks: Iterable[bytes], pages: dict[str, bytes],
+    required_databases: Iterable[str] = CORE_DATABASES,
+) -> tuple[bytes, dict[str, str]] | None:
+    required = tuple(required_databases)
+    probe = pages[required[0]]
     for raw in raw_candidates:
         for mask in masks:
             passphrase = xor_bytes(raw, mask)
             if not verify_enc_key(derive_enc_key(passphrase, probe), probe):
                 continue
             keys: dict[str, str] = {}
-            for rel, page in pages.items():
+            for rel in required:
+                page = pages[rel]
                 key = derive_enc_key(passphrase, page)
                 if verify_enc_key(key, page):
                     keys[rel] = key.hex()
-            if all(rel in keys for rel in CORE_DATABASES):
+            if all(rel in keys for rel in required):
                 return passphrase, keys
     return None
 
 
 def plan(config: dict[str, object]) -> dict[str, object]:
     return {
+        "tool_version": TOOL_VERSION,
         "status": "READY_FOR_KEY_CAPTURE_APPROVAL",
         "action": "CURRENT_VERSION_READ_ONLY_PROCESS_MEMORY_SCAN",
         "process": "Weixin.exe",
@@ -245,8 +297,14 @@ def main() -> int:
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--i-understand-read-process-memory", action="store_true")
     args = parser.parse_args()
-    if sys.platform != "win32":
-        print("Windows only", file=sys.stderr)
+    try:
+        require_supported_platform("windows")
+    except RuntimeError as exc:
+        print(json.dumps({
+            "tool_version": TOOL_VERSION,
+            "status": "FAILED",
+            "error": str(exc),
+        }, ensure_ascii=False), file=sys.stderr)
         return 2
     if not CONFIG_FILE.exists():
         print("Run preflight --configure first", file=sys.stderr)
@@ -261,50 +319,78 @@ def main() -> int:
 
     started = time.monotonic()
     result: dict[str, object] = {
+        "tool_version": TOOL_VERSION,
         "status": "FAILED", "checked_at": utc_now(), "read_only_process_access": True,
         "process_memory_written": False, "hook_installed": False, "wechat_restarted": False,
         "secret_output": False,
     }
     try:
-        info = process_info()
-        pages = collect_pages(Path(str(config["db_base_path"])))
-        masks = find_dll_masks(Path(str(info["path"])))
-        if not masks:
-            raise RuntimeError("No compatible mask pattern was found in the signed Weixin.dll")
+        require_supported_platform("windows")
+        core_databases = configured_core_databases(config, verify_source=True)
+        pages = collect_pages(Path(str(config["db_base_path"])), core_databases)
         pids = get_pids()
         if not pids:
             raise RuntimeError("Weixin.exe is not running")
+        validated_processes: list[tuple[int, dict[str, object]]] = []
+        inspection_access_denied = 0
+        for pid in pids:
+            try:
+                validated_processes.append((pid, process_info(pid)))
+            except ProcessInspectionAccessDenied:
+                inspection_access_denied += 1
+            except (RuntimeError, OSError, subprocess.SubprocessError):
+                continue
+        if not validated_processes:
+            if inspection_access_denied == len(pids):
+                raise RuntimeError("PROCESS_MEMORY_ACCESS_DENIED")
+            raise RuntimeError("No running Weixin process passed DLL signature and module validation")
+        masks: set[bytes] = set()
+        for _, info in validated_processes:
+            masks.update(find_dll_masks(Path(str(info["path"]))))
+        if not masks:
+            raise RuntimeError("No compatible mask pattern was found in the signed Weixin.dll")
         candidates: set[bytes] = set()
         opened = bytes_read = markers = 0
-        for pid in pids:
+        scan_stats: list[dict[str, int]] = []
+        for pid, _ in validated_processes:
             found, stats = scan_process(pid)
             candidates.update(found)
+            scan_stats.append(stats)
             opened += stats["opened"]
             bytes_read += stats["bytes_read"]
             markers += stats["markers"]
-        recovered = recover(candidates, masks, pages)
+        access_stop_reason = process_memory_access_stop_reason(scan_stats)
+        if access_stop_reason:
+            raise RuntimeError(access_stop_reason)
+        recovered = recover(candidates, masks, pages, core_databases)
         if recovered is None:
             raise RuntimeError("No candidate passed every core database HMAC gate")
-        passphrase, keys = recovered
-        save_secret_json({
+        _, keys = recovered
+        protected_value = {
             "schema_version": 2,
             "captured_at": utc_now(),
             "account_tag": config.get("account_tag"),
             "source": "windows-v4-read-only-current-version",
-            "passphrase": passphrase.hex(),
             "keys": keys,
-        })
+        }
+        save_secret_json(protected_value)
+        readback = load_secret_json()
+        if readback.get("account_tag") != protected_value["account_tag"] or readback.get("keys") != keys:
+            raise RuntimeError("Protected key-store readback did not match the captured keys")
         result.update({
             "status": "VERIFIED_CURRENT_VERSION_READ_ONLY_RECOVERY",
-            "wechat_version": info.get("version", "unknown"),
-            "process_count": len(pids), "opened_processes": opened,
+            "wechat_version": sorted({str(info.get("version", "unknown")) for _, info in validated_processes}),
+            "discovered_process_count": len(pids),
+            "validated_process_count": len(validated_processes),
+            "process_count": len(validated_processes),
+            "opened_processes": opened,
             "bytes_read": bytes_read, "memory_markers": markers,
             "unique_candidate_count": len(candidates), "dll_mask_candidate_count": len(masks),
-            "validated_core_database_count": len(CORE_DATABASES),
+            "validated_core_database_count": len(core_databases),
             "validated_database_count": len(keys), "keys_file": public_path_label(KEYS_FILE),
         })
     except Exception as exc:
-        result.update({"error_type": type(exc).__name__, "error": str(exc)[:500]})
+        result.update({"error_type": type(exc).__name__, "error": redact_private_text(exc)})
     result["elapsed_seconds"] = round(time.monotonic() - started, 2)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] == "VERIFIED_CURRENT_VERSION_READ_ONLY_RECOVERY" else 5

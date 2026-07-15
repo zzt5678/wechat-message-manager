@@ -7,8 +7,6 @@ import json
 import os
 from pathlib import Path
 import struct
-import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -101,11 +99,34 @@ class SecurityBoundaryTests(unittest.TestCase):
 
     def test_legacy_plan_is_explicit_and_non_default(self) -> None:
         value = legacy_windows.plan()
-        self.assertEqual(value["status"], "READY_FOR_EXPLICIT_WINDOWS_LEGACY_FALLBACK")
+        self.assertEqual(value["status"], "DISABLED_PENDING_LEGACY_HARDENING")
+        self.assertFalse(value["executable"])
         self.assertFalse(value["default_path"])
         self.assertFalse(value["silent_install_or_uninstall"])
         self.assertTrue(value["requires_separate_restore_approval"])
         self.assertNotIn(str(Path.home()), json.dumps(value))
+
+    def test_legacy_state_changes_cannot_be_called_directly(self) -> None:
+        operations = (
+            lambda: legacy_windows.download_installer(),
+            lambda: legacy_windows.remove_private_tree(Path("private")),
+            lambda: legacy_windows.remove_installed_legacy_tree(Path("legacy"), Path("install")),
+            lambda: legacy_windows.run_7zip(Path("7z"), Path("archive"), Path("destination")),
+            lambda: legacy_windows.extract_payload(),
+            lambda: legacy_windows.save_state({}),
+            lambda: legacy_windows.prepare_fallback(),
+            lambda: legacy_windows.copy_stable(Path("source"), Path("destination")),
+            lambda: legacy_windows.snapshot_core_databases(Path("db_storage")),
+            lambda: legacy_windows.switch_to_legacy(),
+            lambda: legacy_windows.capture_legacy(),
+            lambda: legacy_windows.restore_current(),
+            lambda: legacy_windows.verify_restored(),
+            lambda: legacy_windows.cleanup_installed_legacy(),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation):
+                with self.assertRaisesRegex(RuntimeError, "DISABLED_PENDING_LEGACY_HARDENING"):
+                    operation()
 
     def test_legacy_private_path_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -189,17 +210,17 @@ class SecurityBoundaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             destination = install_skill(Path(directory))
             runner = destination / "scripts/run_manager.py"
-            completed = subprocess.run(
-                [sys.executable, str(runner), "--help"],
-                cwd=directory,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=True,
-                env={**os.environ, "PYTHONIOENCODING": "ascii"},
+            self.assertTrue(runner.is_file())
+            if os.name != "nt":
+                self.assertTrue(os.access(runner, os.X_OK))
+            self.assertEqual(
+                (destination / ".manager-home").read_text(encoding="utf-8").strip(),
+                str(Path(__file__).resolve().parents[1]),
             )
-            self.assertIn("Local WeChat message manager", completed.stdout)
-            self.assertNotIn(str(Path.home()), completed.stdout)
+
+    def test_windows_capture_does_not_persist_account_passphrase(self) -> None:
+        source = Path(__file__).resolve().parents[1] / "capture_keys_windows.py"
+        self.assertNotIn('"passphrase":', source.read_text(encoding="utf-8"))
 
     def test_repository_has_no_nested_runtime_project(self) -> None:
         root = Path(__file__).resolve().parents[1]

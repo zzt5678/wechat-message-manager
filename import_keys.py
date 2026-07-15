@@ -9,8 +9,11 @@ from pathlib import Path
 import struct
 import sys
 
-from manager_config import CORE_DATABASES, load_config, public_path_label, KEYS_FILE
-from secret_store import save_secret_json
+from manager_config import (
+    KEYS_FILE, TOOL_VERSION, configured_core_databases, load_config, public_path_label,
+    redact_private_text, require_supported_platform,
+)
+from secret_store import load_secret_json, save_secret_json
 
 
 PAGE_SIZE = 4096
@@ -26,6 +29,8 @@ def verify_key(key: bytes, page: bytes) -> bool:
 
 
 def load_key_map(path: Path) -> dict[str, str]:
+    if path.stat().st_size > 1024 * 1024:
+        raise ValueError("Import file exceeds the 1 MiB safety limit")
     value = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(value, dict) and isinstance(value.get("keys"), dict):
         value = value["keys"]
@@ -49,16 +54,31 @@ def main() -> int:
     parser.add_argument("--file", required=True, type=Path, help="local JSON key map")
     parser.add_argument("--delete-source", action="store_true", help="delete the plaintext JSON after verified import")
     args = parser.parse_args()
+    try:
+        require_supported_platform()
+    except RuntimeError as exc:
+        print(json.dumps({
+            "tool_version": TOOL_VERSION,
+            "status": "FAILED",
+            "error": str(exc),
+        }, ensure_ascii=False), file=sys.stderr)
+        return 2
     source = args.file.expanduser().resolve()
     if not source.is_file():
         print("Import file does not exist", file=sys.stderr)
         return 2
     try:
         config = load_config()
+        if not config.get("db_base_path"):
+            raise RuntimeError("CONFIGURATION_REQUIRED: run preflight --configure first")
+        core_databases = configured_core_databases(config, verify_source=True)
         db_base = Path(str(config["db_base_path"]))
         supplied = load_key_map(source)
         verified: dict[str, str] = {}
-        for rel, encoded in supplied.items():
+        for rel in core_databases:
+            encoded = supplied.get(rel)
+            if encoded is None:
+                continue
             database = db_base / Path(rel)
             if not database.is_file():
                 continue
@@ -66,27 +86,36 @@ def main() -> int:
                 page = handle.read(PAGE_SIZE)
             if len(page) == PAGE_SIZE and verify_key(bytes.fromhex(encoded), page):
                 verified[rel] = encoded
-        if not all(rel in verified for rel in CORE_DATABASES):
+        if not all(rel in verified for rel in core_databases):
             raise RuntimeError("Imported keys did not validate every core database")
-        save_secret_json({
+        protected_value = {
             "schema_version": 2,
             "captured_at": datetime.now(timezone.utc).isoformat(),
             "account_tag": config.get("account_tag"),
             "source": "verified-manual-import",
             "keys": verified,
-        })
+        }
+        save_secret_json(protected_value)
+        readback = load_secret_json()
+        if readback.get("account_tag") != protected_value["account_tag"] or readback.get("keys") != verified:
+            raise RuntimeError("Protected key-store readback did not match; import source was retained")
         if args.delete_source:
             source.unlink()
         print(json.dumps({
+            "tool_version": TOOL_VERSION,
             "status": "VERIFIED_KEY_IMPORT",
-            "validated_core_database_count": len(CORE_DATABASES),
+            "validated_core_database_count": len(core_databases),
             "validated_database_count": len(verified),
             "source_deleted": args.delete_source,
             "keys_file": public_path_label(KEYS_FILE),
         }, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
-        print(json.dumps({"status": "FAILED", "error": str(exc)[:500]}, ensure_ascii=False, indent=2), file=sys.stderr)
+        print(json.dumps({
+            "tool_version": TOOL_VERSION,
+            "status": "FAILED",
+            "error": redact_private_text(exc, (source,)),
+        }, ensure_ascii=False, indent=2), file=sys.stderr)
         return 5
 
 

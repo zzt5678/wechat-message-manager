@@ -29,6 +29,7 @@ from manager_config import (
     CONFIG_FILE,
     CORE_DATABASES,
     PRIVATE_ROOT,
+    TOOL_VERSION,
     atomic_write_json,
     load_config,
     load_json,
@@ -50,6 +51,16 @@ PAYLOAD_ROOT = EMERGENCY_ROOT / "payload" / LEGACY_RUNTIME_VERSION
 CURRENT_BACKUP_ROOT = EMERGENCY_ROOT / "current-launcher"
 STATE_FILE = EMERGENCY_ROOT / "state.json"
 SNAPSHOT_ROOT = EMERGENCY_ROOT / "database-snapshots"
+PUBLIC_LEGACY_EXECUTION_ENABLED = False
+LEGACY_DISABLED_ERROR = (
+    "DISABLED_PENDING_LEGACY_HARDENING: the public release does not execute "
+    "Windows program-version switching"
+)
+
+
+def stop_disabled_legacy_execution() -> None:
+    """Hard-stop every state-changing legacy function, including direct imports."""
+    raise RuntimeError(LEGACY_DISABLED_ERROR)
 
 
 def sha256_file(path: Path) -> str:
@@ -114,6 +125,7 @@ def verify_legacy_installer(path: Path = INSTALLER_PATH) -> dict[str, object]:
         raise RuntimeError("The legacy installer SHA-256 does not match the pinned release")
     metadata = require_tencent_signature(path, exact_version=LEGACY_INSTALLER_VERSION)
     return {
+        "tool_version": TOOL_VERSION,
         "status": "VERIFIED_PINNED_TENCENT_LEGACY_INSTALLER",
         "version": LEGACY_RUNTIME_VERSION,
         "installer_version": metadata.get("file_version"),
@@ -126,7 +138,10 @@ def verify_legacy_installer(path: Path = INSTALLER_PATH) -> dict[str, object]:
 
 def plan() -> dict[str, object]:
     return {
-        "status": "READY_FOR_EXPLICIT_WINDOWS_LEGACY_FALLBACK",
+        "tool_version": TOOL_VERSION,
+        "status": "DISABLED_PENDING_LEGACY_HARDENING",
+        "executable": False,
+        "reason": "The public release disables program switching until crash-safe rollback and full payload verification are implemented",
         "default_path": False,
         "use_only_after_current_capture_incompatibility": True,
         "legacy_version": LEGACY_RUNTIME_VERSION,
@@ -147,6 +162,7 @@ def plan() -> dict[str, object]:
 
 
 def download_installer() -> dict[str, object]:
+    stop_disabled_legacy_execution()
     INSTALLER_PATH.parent.mkdir(parents=True, exist_ok=True)
     if INSTALLER_PATH.exists():
         return {**verify_legacy_installer(INSTALLER_PATH), "downloaded": False}
@@ -217,6 +233,7 @@ def is_within(path: Path, root: Path) -> bool:
 
 
 def remove_private_tree(path: Path) -> None:
+    stop_disabled_legacy_execution()
     if not is_within(path, EMERGENCY_ROOT) or path.resolve() == EMERGENCY_ROOT.resolve():
         raise RuntimeError("Refusing to remove an unexpected directory")
     if path.exists():
@@ -224,6 +241,7 @@ def remove_private_tree(path: Path) -> None:
 
 
 def remove_installed_legacy_tree(path: Path, install_root: Path) -> None:
+    stop_disabled_legacy_execution()
     expected = (install_root / LEGACY_RUNTIME_VERSION).resolve()
     if path.resolve() != expected or expected.parent != install_root.resolve() or path.is_symlink():
         raise RuntimeError("Refusing to remove an unexpected program directory")
@@ -232,6 +250,7 @@ def remove_installed_legacy_tree(path: Path, install_root: Path) -> None:
 
 
 def run_7zip(executable: Path, archive: Path, destination: Path) -> None:
+    stop_disabled_legacy_execution()
     destination.mkdir(parents=True, exist_ok=False)
     completed = subprocess.run(
         [str(executable), "x", str(archive), f"-o{destination}", "-y"],
@@ -253,6 +272,7 @@ def verify_payload(root: Path) -> dict[str, Path]:
 
 
 def extract_payload(installer: Path = INSTALLER_PATH) -> dict[str, Path]:
+    stop_disabled_legacy_execution()
     if PAYLOAD_ROOT.exists():
         return verify_payload(PAYLOAD_ROOT)
     seven_zip = find_7zip()
@@ -292,16 +312,21 @@ def load_state() -> dict[str, object]:
 
 
 def save_state(value: dict[str, object]) -> None:
+    stop_disabled_legacy_execution()
     atomic_write_json(STATE_FILE, value)
 
 
 def prepare_fallback() -> dict[str, object]:
+    stop_disabled_legacy_execution()
     verify_legacy_installer()
     existing = load_state()
     if existing.get("status") in {"SWITCHED_TO_LEGACY", "LEGACY_KEYS_CAPTURED", "RESTORED_PENDING_VERIFICATION"}:
         raise RuntimeError("An emergency version transition is already active; restore it before preparing again")
 
-    info = process_info()
+    pids = get_pids()
+    if not pids:
+        raise RuntimeError("Weixin.exe is not running")
+    info = process_info(pids[0])
     current_version = str(info.get("version", ""))
     if not current_version or current_version == LEGACY_RUNTIME_VERSION:
         raise RuntimeError("Prepare must run while the signed current WeChat version is open")
@@ -386,6 +411,7 @@ def verify_prepared_current(state: dict[str, object]) -> tuple[Path, Path, Path]
 
 
 def copy_stable(source: Path, destination: Path) -> tuple[int, str]:
+    stop_disabled_legacy_execution()
     before = sha256_file(source)
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
@@ -397,6 +423,7 @@ def copy_stable(source: Path, destination: Path) -> tuple[int, str]:
 
 
 def snapshot_core_databases(db_base: Path) -> tuple[Path, list[dict[str, object]]]:
+    stop_disabled_legacy_execution()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     temporary = SNAPSHOT_ROOT / f".{stamp}-{os.getpid()}.tmp"
     destination = SNAPSHOT_ROOT / stamp
@@ -428,6 +455,7 @@ def snapshot_core_databases(db_base: Path) -> tuple[Path, list[dict[str, object]
 
 
 def switch_to_legacy() -> dict[str, object]:
+    stop_disabled_legacy_execution()
     require_admin()
     require_wechat_stopped()
     state = load_state()
@@ -487,20 +515,21 @@ def recover_legacy(raw_candidates: Iterable[bytes], pages: dict[str, bytes]):
 
 
 def capture_legacy() -> dict[str, object]:
+    stop_disabled_legacy_execution()
     if not CONFIG_FILE.exists():
         raise RuntimeError("Run preflight --configure first")
     state = load_state()
     if state.get("status") != "SWITCHED_TO_LEGACY":
         raise RuntimeError("The managed legacy switch is not active")
-    info = process_info()
-    if str(info.get("version")) != LEGACY_RUNTIME_VERSION:
+    pids = get_pids()
+    if not pids:
+        raise RuntimeError("Weixin.exe is not running")
+    process_records = [process_info(pid) for pid in pids]
+    if any(str(info.get("version")) != LEGACY_RUNTIME_VERSION for info in process_records):
         raise RuntimeError("Legacy capture only accepts the pinned signed WeChat 4.1.9.57 runtime")
 
     config = load_config()
     pages = collect_pages(Path(str(config["db_base_path"])))
-    pids = get_pids()
-    if not pids:
-        raise RuntimeError("Weixin.exe is not running")
     candidates: set[bytes] = set()
     opened = bytes_read = markers = 0
     for pid in pids:
@@ -512,13 +541,12 @@ def capture_legacy() -> dict[str, object]:
     recovered = recover_legacy(candidates, pages)
     if recovered is None:
         raise RuntimeError("No direct 4.1.9 candidate passed every core database HMAC gate")
-    passphrase, keys = recovered
+    _, keys = recovered
     save_secret_json({
         "schema_version": 2,
         "captured_at": utc_now(),
         "account_tag": config.get("account_tag"),
         "source": "windows-v4-legacy-4.1.9-read-only",
-        "passphrase": passphrase.hex(),
         "keys": keys,
     })
     state.update({"status": "LEGACY_KEYS_CAPTURED", "captured_at": utc_now()})
@@ -542,6 +570,7 @@ def capture_legacy() -> dict[str, object]:
 
 
 def restore_current() -> dict[str, object]:
+    stop_disabled_legacy_execution()
     require_admin()
     require_wechat_stopped()
     state = load_state()
@@ -587,10 +616,14 @@ def restore_current() -> dict[str, object]:
 
 
 def verify_restored() -> dict[str, object]:
+    stop_disabled_legacy_execution()
     state = load_state()
     if state.get("status") != "RESTORED_PENDING_VERIFICATION":
         raise RuntimeError("Restore verification is not pending")
-    info = process_info()
+    pids = get_pids()
+    if not pids:
+        raise RuntimeError("Weixin.exe is not running")
+    info = process_info(pids[0])
     expected_version = str(state["current_version"])
     dll = Path(str(info["path"])).resolve()
     expected_dll = Path(str(state["current_dll"])).resolve()
@@ -608,6 +641,7 @@ def verify_restored() -> dict[str, object]:
 
 
 def cleanup_installed_legacy() -> dict[str, object]:
+    stop_disabled_legacy_execution()
     require_admin()
     require_wechat_stopped()
     state = load_state()
@@ -675,6 +709,12 @@ def main() -> int:
     if args.command == "plan":
         print(json.dumps(plan(), ensure_ascii=False, indent=2))
         return 0
+    if not PUBLIC_LEGACY_EXECUTION_ENABLED:
+        print(json.dumps({
+            "status": "DISABLED_PENDING_LEGACY_HARDENING",
+            "error": "The public release does not execute Windows program-version switching",
+        }, ensure_ascii=False, indent=2), file=sys.stderr)
+        return 2
     gates = {
         "download": ("i_understand_download_legacy_installer", download_installer),
         "prepare": ("i_understand_prepare_private_backup", prepare_fallback),

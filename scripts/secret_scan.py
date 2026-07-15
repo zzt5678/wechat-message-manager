@@ -8,7 +8,17 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_PARTS = {".git", ".venv", "vendor", "00_sources", "01_current", "02_versions", "04_audit", "05_tmp", "__pycache__"}
-TEXT_SUFFIXES = {".py", ".md", ".txt", ".yml", ".yaml", ".json", ".ps1", ".sh", ".cmd", ".toml"}
+TEXT_SUFFIXES = {
+    ".py", ".md", ".txt", ".yml", ".yaml", ".json", ".ps1", ".sh",
+    ".cmd", ".toml", ".ini", ".cfg", ".env", ".xml", ".html", ".js", ".ts", ".rst",
+}
+TEXT_NAMES = {".gitignore", ".gitattributes", "LICENSE", "COPYING", "Dockerfile", "Makefile"}
+FORBIDDEN_SUFFIXES = {
+    ".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm", ".db-journal",
+    ".dpapi", ".keychain", ".key", ".pem", ".p12", ".pfx", ".dmp",
+    ".exe", ".dll", ".bin", ".zip", ".7z", ".rar", ".dmg", ".pkg",
+    ".msi", ".tar", ".gz", ".tgz",
+}
 PATTERNS = {
     "private Windows home": re.compile(r"C:\\Users\\(?!<|USERNAME)[^\\\s]+", re.IGNORECASE),
     "private macOS home": re.compile(r"/Users/(?!<|USERNAME)[^/\s]+"),
@@ -26,9 +36,18 @@ PUBLIC_SHA256 = {
 
 def should_scan(path: Path) -> bool:
     return (
-        path.suffix.lower() in TEXT_SUFFIXES
+        (path.suffix.lower() in TEXT_SUFFIXES or path.name in TEXT_NAMES)
         and path.as_posix() != "scripts/secret_scan.py"
         and not any(part in SKIP_PARTS for part in path.parts)
+    )
+
+
+def forbidden_artifact(path: Path) -> bool:
+    name = path.name.casefold()
+    return (
+        path.suffix.casefold() in FORBIDDEN_SUFFIXES
+        or name == "config.local.json"
+        or (name.startswith("keys") and path.suffix.casefold() in {".json", ".dat"})
     )
 
 
@@ -59,6 +78,8 @@ def scan_history(findings: list[str]) -> int:
         if len(parts) != 2:
             continue
         path = Path(parts[1])
+        if forbidden_artifact(path):
+            findings.append(f"history:{path.as_posix()}@{parts[0][:12]}: forbidden private/binary artifact")
         if should_scan(path):
             blobs.setdefault(parts[0], path)
     scanned = 0
@@ -68,6 +89,7 @@ def scan_history(findings: list[str]) -> int:
             capture_output=True, text=True, timeout=10, check=True,
         )
         if int(size.stdout.strip()) > 2 * 1024 * 1024:
+            findings.append(f"history:{path.as_posix()}@{object_id[:12]}: oversized text blob was not scanned")
             continue
         content = subprocess.run(
             ["git", "cat-file", "-p", object_id], cwd=ROOT,
@@ -85,6 +107,10 @@ def main() -> int:
         if not path.is_file():
             continue
         relative = path.relative_to(ROOT)
+        if any(part in SKIP_PARTS for part in relative.parts):
+            continue
+        if forbidden_artifact(relative):
+            findings.append(f"{relative.as_posix()}: forbidden private/binary artifact")
         if not should_scan(relative):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")

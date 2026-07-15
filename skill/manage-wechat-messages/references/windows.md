@@ -1,40 +1,29 @@
 # Windows workflow
 
-Use `scripts/run_manager.py` followed by the arguments below.
+Supported release-candidate scope is Windows 11 x64 with 64-bit Python. Use `scripts/run_manager.py` only after it resolves the repository `.venv`, then follow:
 
 ```text
 preflight
+preflight --configure [--account-tag <user-selected-tag>]
 capture-plan
-refresh --mode incremental
-query digest-source --date today --format json
 ```
 
-If preflight shows no protected keys, show the non-executing `capture-plan` and request explicit consent. Only after consent:
+If keys are absent, explain the read-only process-memory scan and request explicit consent. Only after consent:
 
 ```text
 capture --i-understand-read-process-memory
 ```
 
-Expected success is `VERIFIED_CURRENT_VERSION_READ_ONLY_RECOVERY`. It directly supports the current installed version when its layout matches; do not ask the user to downgrade unless the current method is incompatible and the user separately requests the emergency route.
+Require `VERIFIED_CURRENT_VERSION_READ_ONLY_RECOVERY`. The configured dynamic manifest, not a fixed shard count, defines the databases that must all pass HMAC.
 
-## Emergency 4.1.9 fallback
+The user then manually exits every WeChat process. Run `refresh --mode full` for first use or incremental later, followed by `query status`. Stop unless the statuses are `VERIFIED_REFRESH` and `VERIFIED_FRESH_VAULT`.
 
-Use only after a documented current-capture compatibility failure. First show:
-
-```text
-legacy-plan
-```
-
-Read the repository `docs/emergency-downgrade.md` completely before acting. Require a fresh, separate approval before each mutating or sensitive command:
+Before message-bearing queries, disclose scope/model processing and obtain approval. Then add:
 
 ```text
-legacy-download --i-understand-download-legacy-installer
-legacy-prepare --i-understand-prepare-private-backup
-legacy-switch --i-understand-temporary-version-switch
-legacy-capture --i-understand-read-process-memory
-legacy-restore --i-understand-restore-current-version
-legacy-verify-restored
-legacy-cleanup --i-understand-remove-installed-legacy-copy
+query digest-source --date today --max-messages 500 --max-chars 30000 --format json --i-understand-message-content-output
 ```
 
-The user must manually exit, start, and log in to WeChat at the documented boundaries. `legacy-switch`, `legacy-restore`, and `legacy-cleanup` require Administrator PowerShell. Never bypass the pinned Tencent URL, size, SHA-256, exact versions, Authenticode, state, snapshot, seven-database HMAC, restore, or full-refresh gates.
+For duplicate display names, use the approved sessions result's opaque `session_tag` with `history --session-tag`; never expose an internal username.
+
+The Windows 4.1.9 route is disabled pending crash-safe rollback and full payload verification. `legacy-plan` only reports that state. Never bypass it, invoke internal legacy operations, or recommend downgrade.

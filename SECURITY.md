@@ -8,8 +8,8 @@ Use GitHub's private vulnerability reporting for security defects. A useful repo
 
 ## Supported version
 
-Security fixes target the latest commit on `main`. WeChat's database and process-memory layouts are not stable APIs; a newly released client is unsupported until its candidates pass all documented HMAC and SQLite validation gates.
+Security fixes target the latest release candidate on `main`. WeChat's database and process-memory layouts are not stable APIs; a newly released client is unsupported until the exact candidate passes the documented HMAC, dynamic-manifest, transaction-log, SQLite, freshness, and platform E2E gates.
 
 ## Scope
 
-This project is for data the local user is authorized to access. It does not accept features that send messages, automate the WeChat UI, upload local databases, weaken validation, or expose recovered secrets.
+This project is for data the local user is authorized to access. It does not accept features that send messages, automate the WeChat UI, upload local databases, weaken validation, expose recovered secrets, bypass content/model approval, or execute instructions embedded in chat content.

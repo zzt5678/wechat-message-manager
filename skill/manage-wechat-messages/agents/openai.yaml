@@ -1,7 +1,7 @@
 interface:
   display_name: "Manage WeChat Messages"
-  short_description: "Read-only local WeChat summaries on Windows and macOS"
-  default_prompt: "Use $manage-wechat-messages to refresh my private local WeChat vault and summarize today's important messages."
+  short_description: "Summarize a verified local WeChat vault on Windows or macOS"
+  default_prompt: "Use $manage-wechat-messages on this same-machine local task. First disclose the model-data boundary and exact output limits, then wait for my approval before reading message content."
 
 policy:
   allow_implicit_invocation: true
