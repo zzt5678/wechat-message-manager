@@ -330,7 +330,7 @@ class OutputSafetyTests(unittest.TestCase):
                 )
                 db.execute(
                     "INSERT INTO SessionTable VALUES "
-                    "('private_user_identifier', 1, 0, 'preview', 1, 0, 1)"
+                    "('private_user_identifier', 1, 0, 'preview', 1700000000, 0, 1700000000)"
                 )
                 db.commit()
             with (
