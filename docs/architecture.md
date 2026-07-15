@@ -4,6 +4,7 @@
 
 - `preflight.py`：发现账号数据库，只输出不可逆账号标签。
 - `capture_keys_windows.py`：当前 Windows 版本只读恢复和 HMAC 门。
+- `legacy_windows.py`：固定 4.1.9 制品的下载、签名/哈希门、私密备份、临时切换、旧版只读捕获和恢复状态机。
 - `capture_keys_macos.py`：显式 opt-in 的签名副本 Hook。
 - `import_keys.py`：跨平台验证已有 key map。
 - `secret_store.py`：Windows DPAPI / macOS Keychain。
@@ -16,6 +17,8 @@
 数据库密码学参数和内存布局都不是公开稳定 API。Windows 捕获器将 DLL 内存结构当作不可信的候选来源；真正的兼容性判断来自数据库 HMAC。因此升级后的最坏结果应该是“无法恢复并停止”，而不是保存错误 key。
 
 已有账号 key 可能跨客户端升级继续有效，但不能依赖这一点。每次 refresh 都重新验证页面 HMAC和文件一致性。
+
+Windows 旧版备用路径与当前版 DLL 掩码恢复相互独立：4.1.9 捕获器只把旧版描述符指向的32字节值作为账号口令候选，不读取新版 DLL 掩码。两条路径最终使用同一套七库 HMAC、逐页 HMAC、SQLite 和 freshness 门。
 
 ## 数据覆盖
 

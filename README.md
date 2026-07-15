@@ -9,12 +9,13 @@
 | Windows 11 / 微信 4.1.11.54 | 当前版本 `ReadProcessMemory` + 已签名 `Weixin.dll` 掩码恢复；无注入、无 Hook、无需降级 | 2026-07-13 真机验证：7/7 核心库 HMAC 通过；2026-07-14 再次完成增量解密与 7/7 `quick_check` |
 | macOS / 微信 4.x | 导入已有 key，或明确同意后对单独的 ad-hoc 签名副本使用 Frida Hook | 跨平台核心与 Hook 消息处理已做静态/模拟验证；本仓库的 macOS 捕获脚本尚未在 Mac 真机验收 |
 
-Windows 直接恢复是默认方案。临时降级到 4.1.9.x 只保留为[应急思路](docs/emergency-downgrade.md)，不是正常安装步骤。微信升级可能改变内部结构，因此“当前已验证”不等于永久兼容；每次恢复仍须通过数据库 HMAC，失败时不会猜测或保存候选。
+Windows 直接恢复是默认方案。项目也包含一个隔离的 [4.1.9.57 应急备用流程](docs/emergency-downgrade.md)：仅在当前版恢复明确不兼容后，经多次显式确认，才会从固定腾讯 HTTPS 地址下载、校验并私密提取旧版，备份当前启动器和核心数据库后临时切换，捕获完成立即恢复当前版。安装包、程序备份和数据库快照都在 Git 忽略的本机私密目录中，不进入仓库。微信升级可能改变内部结构，因此“当前已验证”不等于永久兼容；每次恢复仍须通过数据库 HMAC，失败时不会猜测或保存候选。
 
 ## 安全边界
 
 - 仅处理当前用户有权访问的本机账号数据。
 - Windows 默认路径只申请 `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`，不写内存、不注入、不 Hook、不重启微信。
+- Windows 4.1.9 备用路径会临时替换启动器并增加一个腾讯签名的旧版本目录；它要求单独批准、管理员权限、恢复验证和数据库快照，不会静默安装或卸载。
 - macOS Hook 是独立、显式同意的高风险选项，只允许连接到用户准备的微信副本，不修改 `/Applications/WeChat.app` 原件。
 - key 在 Windows 由 DPAPI 保护，在 macOS 存入 Keychain；明文数据库和审计回执只进入应用私密目录。
 - 任何核心 key/HMAC、源文件一致性、SQLite `quick_check` 或 freshness 校验失败都会停止。
@@ -65,6 +66,14 @@ cd wechat-message-manager
 ```
 
 成功状态必须是 `VERIFIED_CURRENT_VERSION_READ_ONLY_RECOVERY`。候选只在七个核心数据库全部通过 page-1 HMAC 后写入 DPAPI；终端和回执都不输出 key、salt、wxid 或私密路径。通常不需要管理员权限，若 Windows 拒绝读取目标进程才考虑提升权限。细节见 [docs/windows.md](docs/windows.md)。
+
+若且仅若这里返回明确的兼容性失败，可先查看不会修改系统的备用计划：
+
+```powershell
+.\manage.cmd legacy-plan
+```
+
+备用路径固定为曾真机验证的腾讯签名 4.1.9.57，不从第三方镜像下载，也不把安装包放进 Git。完整的逐步确认、约 2 GiB 空间和 7-Zip 应急依赖说明见 [docs/emergency-downgrade.md](docs/emergency-downgrade.md)。不要把它当作首次安装捷径。
 
 ## macOS：已有 key 或签名副本
 
@@ -131,7 +140,7 @@ Skill 不会绕过捕获批准门，也不会自动操作微信界面。
 - [安全模型](docs/security.md)
 - [架构和兼容性](docs/architecture.md)
 - [开源方案调研](docs/research.md)
-- [降级应急附录](docs/emergency-downgrade.md)
+- [Windows 4.1.9 备用流程](docs/emergency-downgrade.md)
 - [第三方来源与许可证边界](THIRD_PARTY_NOTICES.md)
 - [安全报告](SECURITY.md)
 - [贡献指南](CONTRIBUTING.md)

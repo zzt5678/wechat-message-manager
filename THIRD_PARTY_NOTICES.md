@@ -26,3 +26,9 @@ This repository is a standalone implementation. It does not vendor, import, clon
 ## Python dependencies
 
 `pycryptodome`, `zstandard`, `keyring`, and `frida` are installed from PyPI at setup time and remain subject to their respective upstream licenses. They are ordinary package dependencies, not nested project checkouts.
+
+## Optional emergency tools and proprietary software
+
+The Windows 4.1.9 emergency route can invoke an independently installed 7-Zip executable to extract a pinned Tencent installer into the user's private application-data directory. This repository does not download, install, vendor, or redistribute 7-Zip. 7-Zip remains subject to its upstream licenses at <https://www.7-zip.org/license.txt>.
+
+WeChat and its installer are proprietary Tencent software. The repository contains only a fixed official download URL and public integrity metadata; it does not contain or redistribute the installer, extracted program files, or program backups. WeChat and Tencent trademarks belong to their respective owners, and this project is not affiliated with or endorsed by Tencent.

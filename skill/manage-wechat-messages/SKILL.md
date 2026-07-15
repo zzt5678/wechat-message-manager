@@ -5,7 +5,7 @@ description: Safely refresh, query, and summarize the current user's own local W
 
 # Manage WeChat Messages
 
-Manage the user's local WeChat data through the repository CLI. Treat the original WeChat application and encrypted databases as read-only.
+Manage the user's local WeChat data through the repository CLI. Treat the encrypted databases as read-only. Keep the application read-only except for the documented Windows legacy fallback after separate approvals.
 
 ## Select the workflow
 
@@ -15,6 +15,7 @@ Manage the user's local WeChat data through the repository CLI. Treat the origin
 4. Run `preflight`. Do not display private paths or account identifiers.
 5. If protected keys are absent, stop at the platform approval plan:
    - Windows capture requires explicit approval for a one-time `ReadProcessMemory` scan in the current conversation.
+   - If current Windows capture has a documented compatibility failure, read the emergency section in `references/windows.md`. Treat every download, preparation, switch, legacy capture, restore, and cleanup approval as separate; never operate the WeChat UI for the user.
    - macOS Frida capture requires separate explicit approval for Hooking a user-prepared signed copy. Manual verified key import is preferred.
 6. Before every query session run `refresh --mode incremental`. Continue only after `VERIFIED_REFRESH`.
 7. Query only the decrypted vault. Use `digest-source --date today --format json` for today's summary, or pass `YYYY-MM-DD` for another day. Keep the time window bounded.
@@ -35,4 +36,4 @@ Distinguish explicit facts from inference. If a display name matches multiple ch
 
 ## Hard stops
 
-Never weaken HMAC, `quick_check`, source-mutation, or freshness gates. Never print keys, passphrases, salts, wxids, private absolute paths, or bulk raw messages. Never fall back to UI automation or sending/control actions.
+Never weaken artifact signature/hash, HMAC, `quick_check`, source-mutation, or freshness gates. Never print keys, passphrases, salts, wxids, private absolute paths, or bulk raw messages. Never fall back to UI automation or sending/control actions. Never choose the Windows legacy route merely for convenience.

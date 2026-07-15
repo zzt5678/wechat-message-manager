@@ -16,13 +16,21 @@ def main() -> int:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}:
-        print("""Local WeChat message manager (read-only)
+        print("""Local WeChat message manager (read-only message source)
 
 Commands:
   preflight [--configure]       discover databases without reading chat content
   capture-plan                  show the one-time key-capture impact
   capture --i-understand-read-process-memory
                                 Windows: current-version read-only key recovery
+  legacy-plan                   Windows: show the isolated 4.1.9 emergency route
+  legacy-download [approval]    download and verify the pinned Tencent installer
+  legacy-prepare [approval]     privately extract and back up the current launcher
+  legacy-switch [approval]      after manual exit, snapshot DBs and stage 4.1.9
+  legacy-capture [approval]     recover and HMAC-verify keys from signed 4.1.9
+  legacy-restore [approval]     after manual exit, restore the current launcher
+  legacy-verify-restored        verify the signed current runtime after login
+  legacy-cleanup [approval]     remove only the added 4.1.9 program directory
   capture-macos [options]       macOS: opt-in hook on a separately signed copy
   import-keys --file <json> [--delete-source]
                                 Windows/macOS: verify and protect an existing key map
@@ -41,6 +49,14 @@ Examples:
         "preflight": ("preflight.py", rest),
         "capture-plan": ("capture_keys_windows.py", []),
         "capture": ("capture_keys_windows.py", ["--execute", *rest]),
+        "legacy-plan": ("legacy_windows.py", ["plan"]),
+        "legacy-download": ("legacy_windows.py", ["download", *rest]),
+        "legacy-prepare": ("legacy_windows.py", ["prepare", *rest]),
+        "legacy-switch": ("legacy_windows.py", ["switch", *rest]),
+        "legacy-capture": ("legacy_windows.py", ["capture", *rest]),
+        "legacy-restore": ("legacy_windows.py", ["restore", *rest]),
+        "legacy-verify-restored": ("legacy_windows.py", ["verify-restored", *rest]),
+        "legacy-cleanup": ("legacy_windows.py", ["cleanup", *rest]),
         "capture-macos-plan": ("capture_keys_macos.py", []),
         "capture-macos": ("capture_keys_macos.py", ["--execute", *rest]),
         "import-keys": ("import_keys.py", rest),

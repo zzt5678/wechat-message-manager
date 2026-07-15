@@ -17,6 +17,11 @@ PATTERNS = {
     "access token": re.compile(r"\b(?:gh[opusr]_|sk-)[A-Za-z0-9_-]{20,}\b"),
     "personal QQ email": re.compile(r"\b\d{5,12}@qq\.com\b", re.IGNORECASE),
 }
+PUBLIC_SHA256 = {
+    # Pinned Tencent 4.1.9 installer digest; this is public package metadata,
+    # not a database key or account secret.
+    "8f43225b7388742a9797d31960bf19d6b0902ea58bf1a85b6d8b95d0b71877ed",
+}
 
 
 def should_scan(path: Path) -> bool:
@@ -30,6 +35,8 @@ def should_scan(path: Path) -> bool:
 def scan_text(label: str, value: str, findings: list[str]) -> None:
     for pattern_label, pattern in PATTERNS.items():
         for match in pattern.finditer(value):
+            if pattern_label == "literal 32-byte hex secret" and match.group(0).casefold() in PUBLIC_SHA256:
+                continue
             findings.append(f"{label}: {pattern_label}")
             break
 

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from Crypto.Cipher import AES
 
@@ -18,6 +19,7 @@ from capture_keys_macos import HOOK, match_candidate, plan as macos_plan
 from capture_keys_windows import derive_enc_key, plan as windows_plan, recover
 from dpapi_store import _crypt, _LEGACY_ENTROPY, load_secret_json, save_secret_json
 from import_keys import verify_key
+import legacy_windows
 from manager_config import CORE_DATABASES
 from refresh_vault import decrypt_to_temp, hmac_key
 from scripts.install_skill import install as install_skill
@@ -96,6 +98,69 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertIsNotNone(result)
         _, keys = result
         self.assertEqual(set(keys), set(CORE_DATABASES))
+
+    def test_legacy_plan_is_explicit_and_non_default(self) -> None:
+        value = legacy_windows.plan()
+        self.assertEqual(value["status"], "READY_FOR_EXPLICIT_WINDOWS_LEGACY_FALLBACK")
+        self.assertFalse(value["default_path"])
+        self.assertFalse(value["silent_install_or_uninstall"])
+        self.assertTrue(value["requires_separate_restore_approval"])
+        self.assertNotIn(str(Path.home()), json.dumps(value))
+
+    def test_legacy_private_path_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "emergency"
+            child = root / "payload" / "file"
+            sibling = Path(directory) / "emergency-lookalike" / "file"
+            self.assertTrue(legacy_windows.is_within(child, root))
+            self.assertFalse(legacy_windows.is_within(sibling, root))
+
+    def test_legacy_capture_has_no_injection_or_ui_control_apis(self) -> None:
+        source = Path(legacy_windows.__file__).read_text(encoding="utf-8").casefold()
+        for forbidden in (
+            "writeprocessmemory", "createremotethread", "setwindowshookex",
+            "frida", "pyautogui", "start-process", "sendkeys",
+        ):
+            self.assertNotIn(forbidden, source)
+
+    def test_legacy_direct_candidate_requires_every_core_hmac(self) -> None:
+        passphrase = bytes(range(32))
+        pages = {}
+        for index, rel in enumerate(CORE_DATABASES):
+            salt = bytes([index + 20]) * 16
+            key = derive_enc_key(passphrase, salt + bytes(4080))
+            pages[rel] = authenticated_page(key, salt)
+        result = legacy_windows.recover_legacy([passphrase], pages)
+        self.assertIsNotNone(result)
+        recovered, keys = result
+        self.assertEqual(recovered, passphrase)
+        self.assertEqual(set(keys), set(CORE_DATABASES))
+
+    def test_legacy_installer_requires_hash_version_and_tencent_signature(self) -> None:
+        payload = b"pinned-installer-fixture"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.exe"
+            path.write_bytes(payload)
+            with (
+                patch.object(legacy_windows, "LEGACY_INSTALLER_SIZE", len(payload)),
+                patch.object(legacy_windows, "LEGACY_INSTALLER_SHA256", hashlib.sha256(payload).hexdigest()),
+                patch.object(legacy_windows, "signature_info", return_value={
+                    "signature": "Valid", "signer": "CN=Tencent Technology Company Limited",
+                    "file_version": legacy_windows.LEGACY_INSTALLER_VERSION,
+                }),
+            ):
+                value = legacy_windows.verify_legacy_installer(path)
+                self.assertEqual(value["status"], "VERIFIED_PINNED_TENCENT_LEGACY_INSTALLER")
+            with (
+                patch.object(legacy_windows, "LEGACY_INSTALLER_SIZE", len(payload)),
+                patch.object(legacy_windows, "LEGACY_INSTALLER_SHA256", hashlib.sha256(payload).hexdigest()),
+                patch.object(legacy_windows, "signature_info", return_value={
+                    "signature": "Valid", "signer": "CN=Unknown Publisher",
+                    "file_version": legacy_windows.LEGACY_INSTALLER_VERSION,
+                }),
+            ):
+                with self.assertRaises(RuntimeError):
+                    legacy_windows.verify_legacy_installer(path)
 
     def test_page_decryption_round_trip(self) -> None:
         key = bytes(range(32))
