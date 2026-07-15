@@ -29,4 +29,4 @@ if ($preflightExit -ne 0) {
     Write-Host 'Dependencies are installed. Preflight needs attention before configuration.' -ForegroundColor Yellow
 }
 Write-Host 'After preflight is unambiguous and supported, run .\manage.cmd preflight --configure and follow README.md.'
-exit 0
+$global:LASTEXITCODE = 0

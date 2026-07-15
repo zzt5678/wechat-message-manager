@@ -364,7 +364,7 @@ class PackagingTests(unittest.TestCase):
             "'x86_64'", "sys.getwindowsversion().build >= 22000",
         ):
             self.assertIn(required, windows_setup)
-        self.assertTrue(windows_setup.rstrip().endswith("exit 0"))
+        self.assertTrue(windows_setup.rstrip().endswith("$global:LASTEXITCODE = 0"))
 
     def test_installed_skill_uses_repository_virtual_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
